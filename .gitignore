@@ -2,3 +2,7 @@
 node_modules
 *.xlsx
 .env
+tests/.build
+tests/.artifacts
+tests/reports/latest.html
+__pycache__/

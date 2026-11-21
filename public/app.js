@@ -1,6 +1,6 @@
 /* ITCB marketing plan – client */
 (() => {
-  const VERSION = "1.8.0";
+  const VERSION = "1.8.1";
   const STATUSES = ["לא החל", "בעבודה", "הסתיים", "הועבר לשנה אחרי", "בוטל"];
   const ROLE_LABEL = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
   const COLS = [
@@ -219,6 +219,12 @@
       };
     }
   }
+  // re-render whatever view is open after data changed (year table, gantt, dashboard…)
+  function refreshView(y) {
+    const m = document.getElementById("main");
+    if (S.view === y) return renderYear(m, y);
+    renderView();
+  }
   function go(v) { S.view = v; store.set("itcb_view", v); renderTabs(); renderView(); window.scrollTo(0, 0); }
   async function renderView() {
     const m = document.getElementById("main");
@@ -418,7 +424,7 @@
       if (t.dataset.delrow) {
         if (!confirmInline(t, "ללחוץ שוב למחיקה")) return;
         api(`year/${y}/row/${encodeURIComponent(t.dataset.delrow)}`, { method: "DELETE" })
-          .then((d) => { S.docs[y] = d; toast("המשימה נמחקה"); renderYear(document.getElementById("main"), y); })
+          .then((d) => { S.docs[y] = d; toast("המשימה נמחקה"); refreshView(y); })
           .catch((er) => toast(er.message, true));
         return;
       }
@@ -431,7 +437,7 @@
       const id = sel.dataset.id;
       try {
         S.docs[y] = await api(`year/${y}/row/${encodeURIComponent(id)}`, { method: "PUT", body: { status: sel.value } });
-        toast("הסטטוס עודכן"); renderYear(document.getElementById("main"), y);
+        toast("הסטטוס עודכן"); refreshView(y);
       } catch (er) { toast(er.message, true); }
     };
   }
@@ -529,13 +535,13 @@
       e.target.disabled = true;
       try {
         S.docs[y] = await api(`year/${y}/row${id ? "/" + encodeURIComponent(id) : ""}`, { method: id ? "PUT" : "POST", body });
-        close(); toast(id ? "המשימה נשמרה" : "המשימה נוספה"); renderYear(document.getElementById("main"), y);
+        close(); toast(id ? "המשימה נשמרה" : "המשימה נוספה"); refreshView(y);
       } catch (er) { toast(er.message, true); e.target.disabled = false; }
     };
     const del = ov.querySelector("[data-del]");
     if (del) del.onclick = async () => {
       if (!confirmInline(del, "ללחוץ שוב למחיקה")) return;
-      try { S.docs[y] = await api(`year/${y}/row/${encodeURIComponent(id)}`, { method: "DELETE" }); close(); toast("המשימה נמחקה"); renderYear(document.getElementById("main"), y); }
+      try { S.docs[y] = await api(`year/${y}/row/${encodeURIComponent(id)}`, { method: "DELETE" }); close(); toast("המשימה נמחקה"); refreshView(y); }
       catch (er) { toast(er.message, true); }
     };
   }
@@ -576,12 +582,12 @@
       <div class="field"><label>פירוט הסעיף ומטרות</label><textarea class="input" name="detail" rows="8">${esc(sec.detail)}</textarea></div>`,
       async (f, close) => {
         S.docs[y] = await api(`year/${y}/section${sid ? "/" + sid : ""}`, { method: sid ? "PUT" : "POST", body: { title: f.title.value, detail: f.detail.value } });
-        close(); toast("הסעיף נשמר"); renderYear(document.getElementById("main"), y);
+        close(); toast("הסעיף נשמר"); refreshView(y);
       }, sid ? `<button type="button" class="btn danger" data-delsec>מחיקת סעיף</button>` : "");
     const d = m.form.querySelector("[data-delsec]");
     if (d) d.onclick = async () => {
       if (!confirmInline(d, "ללחוץ שוב למחיקה")) return;
-      try { S.docs[y] = await api(`year/${y}/section/${sid}`, { method: "DELETE" }); m.close(); toast("הסעיף נמחק"); renderYear(document.getElementById("main"), y); }
+      try { S.docs[y] = await api(`year/${y}/section/${sid}`, { method: "DELETE" }); m.close(); toast("הסעיף נמחק"); refreshView(y); }
       catch (er) { m.form.querySelector("[data-err]").textContent = er.message; }
     };
   }
@@ -1153,9 +1159,6 @@
       if (row) {
         tip.style.opacity = 0;
         openRow(y, row.dataset.id);
-        // re-render gantt after save/delete
-        const obs = new MutationObserver(() => { if (!document.querySelector(".overlay")) { obs.disconnect(); if (S.view === "gantt") renderGantt(document.getElementById("main")); } });
-        obs.observe(document.body, { childList: true });
       }
     };
     m.onchange = (e) => {
