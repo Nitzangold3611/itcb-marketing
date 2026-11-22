@@ -1,6 +1,6 @@
 /* ITCB marketing plan – client */
 (() => {
-  const VERSION = "1.9.0";
+  const VERSION = "1.9.1";
   const STATUSES = ["לא החל", "בעבודה", "הסתיים", "הועבר לשנה אחרי", "בוטל"];
   const ROLE_LABEL = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
   const COLS = [
@@ -54,20 +54,21 @@
     return t;
   }
   // three money cards; prev = totals of the previous year (optional) for the change line
-  function moneyCards(t, label, prev, prevY) {
+  function moneyCards(t, label, prev, prevY, whole) {
     const d = (k) => {
       if (!prev) return "";
       const diff = t[k] - prev[k];
       if (!diff) return `<div class="sub delta-line">ללא שינוי לעומת ${prevY}</div>`;
       return `<div class="sub delta-line">${diff > 0 ? "▲" : "▼"} ${shekel(Math.abs(diff))} לעומת ${prevY}</div>`;
     };
-    return `<div class="kpis money-row" aria-label="סיכום כספי ${esc(label)}">
+    const of = (k) => (whole ? `<div class="sub filt-line">לפי הסינון · מתוך ${shekel(whole[k])} בכל השנה</div>` : "");
+    return `<div class="kpis money-row ${whole ? "filtered" : ""}" aria-label="סיכום כספי ${esc(label)}">
       <div class="kpi money" data-k="budget"><div class="lbl">תקציב מתוכנן</div><div class="val">${shekel(t.budget)}</div>
-        <div class="sub">${t.budN} משימות עם תקציב</div>${d("budget")}</div>
+        <div class="sub">${t.budN} משימות עם תקציב</div>${d("budget")}${of("budget")}</div>
       <div class="kpi money" data-k="expense"><div class="lbl">הוצאה בפועל</div><div class="val">${shekel(t.expense)}</div>
-        <div class="sub">${t.budget ? `${Math.round((t.expense / t.budget) * 100)}% מהתקציב · יתרה ${shekel(t.budget - t.expense)}` : "&nbsp;"}</div>${d("expense")}</div>
+        <div class="sub">${t.budget ? `${Math.round((t.expense / t.budget) * 100)}% מהתקציב · יתרה ${shekel(t.budget - t.expense)}` : "&nbsp;"}</div>${d("expense")}${of("expense")}</div>
       <div class="kpi money" data-k="income"><div class="lbl">הכנסה בפועל</div><div class="val">${shekel(t.income)}</div>
-        <div class="sub">${t.income || t.expense ? `מאזן (הכנסה פחות הוצאה): ${shekel(t.income - t.expense)}` : "&nbsp;"}</div>${d("income")}</div>
+        <div class="sub">${t.income || t.expense ? `מאזן (הכנסה פחות הוצאה): ${shekel(t.income - t.expense)}` : "&nbsp;"}</div>${d("income")}${of("income")}</div>
     </div>`;
   }
   // grouped columns: one group per year, bars = budget / expense / income (SVG, RTL: earliest year on the right)
@@ -378,7 +379,7 @@
         <div class="kpi"><div class="lbl">לא החל</div><div class="val" style="color:var(--todo)">${c["לא החל"]}</div></div>
         <div class="kpi"><div class="lbl">הועבר לשנה אחרי</div><div class="val" style="color:var(--moved)">${c["הועבר לשנה אחרי"]}</div></div>
       </div>
-      ${moneyCards(moneyTotals(doc.rows), y)}
+      <div id="moneyBox"></div>
       <div class="toolbar">
         <input class="input search" id="fq" placeholder="חיפוש בכל השדות…" value="${esc(f.q)}">
         <select class="input" id="fp" aria-label="קדימות"><option value="">כל הקדימויות</option>${colValues(doc.rows, "priority").map((p) => `<option value="${esc(p)}" ${f.cols.priority === p ? "selected" : ""}>קדימות ${esc(p)}</option>`).join("")}</select>
@@ -435,9 +436,12 @@
     const doc = S.docs[y];
     const box = document.getElementById("sections");
     const filtering = isFiltering();
-    const total = doc.rows.length, shown = doc.rows.filter(matches).length;
+    const total = doc.rows.length, visible = doc.rows.filter(matches), shown = visible.length;
     const rl = document.getElementById("resultLine");
     if (rl) rl.textContent = filtering ? `מוצגות ${shown} מתוך ${total} משימות` : "";
+    // money totals follow the active filters
+    const mb = document.getElementById("moneyBox");
+    if (mb) mb.innerHTML = moneyCards(moneyTotals(visible), y, null, null, filtering ? moneyTotals(doc.rows) : null);
     if (S.sort !== "plan") {
       const rows = sortRows(doc.rows.filter(matches));
       box.innerHTML = rows.length ? `<section class="section"><div class="sec-head" style="cursor:default"><h2>${{ priority: "כל המשימות לפי קדימות", date: "כל המשימות לפי תאריך", status: "כל המשימות לפי סטטוס" }[S.sort]}</h2><span class="sec-stats">${rows.length} משימות</span></div>${tableHtml(rows, true)}</section>`

@@ -331,3 +331,5 @@ svg.cols .ax-on{fill:var(--navy);font-weight:800}
 .cmp-money div{display:flex;align-items:center;gap:6px}.cmp-money b{margin-inline-start:auto;color:var(--ink)}
 svg.cols{direction:ltr}
 #ch-money svg.cols{max-height:340px}
+.kpis.money-row.filtered .kpi.money{background:#FBFBFF;box-shadow:0 0 0 1px #DDE0F7 inset,var(--shadow)}
+.filt-line{color:var(--navy)}

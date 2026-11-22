@@ -170,3 +170,36 @@ def test_budget_field_is_numeric_and_updates_total(admin_page):
     expect(p.locator(".kpi.money[data-k=budget] .val")).to_have_text(_shekel(before - old + 5000))
     expect(p.locator(f"tr.row[data-id='{rid}'] td.col-budget")).to_have_text("₪5,000")
     shot(p, "budget-edit")
+
+
+def test_money_totals_follow_filters(admin_page):
+    p = admin_page
+    goto_tab(p, "2027")
+    rows = api(p, "GET", "year/2027")["data"]["rows"]
+    # give rows of different priorities budget, expense and income so every total is exercised
+    by_prio = {}
+    for r in rows:
+        if r.get("priority"):
+            by_prio.setdefault(r["priority"], r)
+    for i, r in enumerate(by_prio.values()):
+        assert api(p, "PUT", f"year/2027/row/{r['id']}", {"budget": str(1000 * (i + 1)), "expense": str(100 * (i + 1)), "income": str(10 * (i + 1))})["status"] == 200
+    p.reload()
+    p.wait_for_selector(".kpi.money")
+    rows = api(p, "GET", "year/2027")["data"]["rows"]
+    whole = {k: _sum(rows, k) for k in ("budget", "expense", "income")}
+    for prio in sorted(by_prio):
+        p.select_option("#fp", prio)
+        sel = [r for r in rows if r.get("priority") == prio]
+        for k in ("budget", "expense", "income"):
+            expect(p.locator(f".kpi.money[data-k={k}] .val")).to_have_text(_shekel(_sum(sel, k)))
+            expect(p.locator(f".kpi.money[data-k={k}] .filt-line")).to_contain_text(_shekel(whole[k]))
+    shot(p, "money-filtered-priority")
+    # free-text search (re-renders without rebuilding the page) updates the totals too
+    p.select_option("#fp", "")
+    p.fill("#fq", "zzz-no-match")
+    expect(p.locator(".kpi.money[data-k=budget] .val")).to_have_text("₪0")
+    # clearing filters shows the whole year again, without the "filtered" note
+    p.fill("#fq", "")
+    for k in ("budget", "expense", "income"):
+        expect(p.locator(f".kpi.money[data-k={k}] .val")).to_have_text(_shekel(whole[k]))
+    expect(p.locator(".filt-line")).to_have_count(0)
