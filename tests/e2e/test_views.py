@@ -89,3 +89,56 @@ def test_gantt_undated_list_opens_task(admin_page):
         und.locator("summary").click()
         und.locator("li").first.click()
         expect(p.locator(".drawer")).to_be_visible()
+
+
+def _money(rows, k):
+    import re as _re
+    tot = 0
+    for r in rows:
+        t = _re.sub(r"[,\s₪]|ש״ח|ש\"ח", "", str(r.get(k) or ""))
+        if _re.fullmatch(r"-?\d+(\.\d+)?", t):
+            tot += float(t)
+    return round(tot)
+
+
+def _shekel(n):
+    return ("−" if n < 0 else "") + "₪" + f"{abs(round(n)):,}"
+
+
+def test_dashboard_money_cards_and_year_chart(admin_page):
+    p = admin_page
+    # give 2025 a budget and an expense so the chart has real differences between years
+    rid = api(p, "GET", "year/2025")["data"]["rows"][0]["id"]
+    assert api(p, "PUT", f"year/2025/row/{rid}", {"budget": "4000", "expense": "1500"})["status"] == 200
+    goto_tab(p, "dash")
+    years = api(p, "GET", "years")["data"]["years"]
+    for y in years:
+        p.click(f"[data-dy='{y}']")
+        rows = api(p, "GET", f"year/{y}")["data"]["rows"]
+        for k in ("budget", "expense", "income"):
+            expect(p.locator(f".kpi.money[data-k={k}] .val")).to_have_text(_shekel(_money(rows, k)))
+    # change vs previous year is shown from the 2nd year on
+    expect(p.locator(".kpi.money[data-k=budget] .delta-line")).to_contain_text(f"לעומת {years[-2]}")
+    # chart: one bar (or zero-line) per year x 3 measures, selected year highlighted
+    expect(p.locator("#ch-money [data-mtip]")).to_have_count(len(years) * 3)
+    expect(p.locator("#ch-money .ax-on")).to_have_text(years[-1])
+    p.hover("#ch-money path[data-mtip] >> nth=0")
+    expect(p.locator("#dtip")).to_contain_text("₪")
+    shot(p, "dashboard-money", full_page=True)
+    p.click("[data-tbl='ch-money']")
+    expect(p.locator("#ch-money .dtbl tbody tr")).to_have_count(len(years))
+    first = api(p, "GET", f"year/{years[0]}")["data"]["rows"]
+    expect(p.locator("#ch-money .dtbl tbody tr").first.locator("td").nth(1)).to_have_text(_shekel(_money(first, "budget")))
+
+
+def test_compare_shows_money_per_year(admin_page):
+    p = admin_page
+    goto_tab(p, "compare")
+    years = api(p, "GET", "years")["data"]["years"]
+    for i, y in enumerate(years):
+        rows = api(p, "GET", f"year/{y}")["data"]["rows"]
+        card = p.locator(".cmp-cards .kpi").nth(i)
+        for k in ("budget", "expense", "income"):
+            expect(card.locator(f".cmp-money [data-k={k}] b")).to_have_text(_shekel(_money(rows, k)))
+    expect(p.locator("#cmpMoney tbody tr")).to_have_count(len(years))
+    shot(p, "compare-money", full_page=True)

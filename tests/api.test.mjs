@@ -264,3 +264,43 @@ describe("סעיפים ושנים", () => {
     assert.equal(d.rows.length, 0); assert.equal(d.sections.length, 0);
   });
 });
+
+describe("תקציב מספרי", () => {
+  test("המרה חד-פעמית: סכום ברור הופך למספר, טקסט אחר עובר להערות בלי לאבד כלום", async () => {
+    const t = await adminToken();
+    const d = (await call("GET", "year/2027", null, t)).data;
+    assert.equal(d.budgetNumeric, true);
+    for (const r of d.rows) assert.ok(r.budget === "" || /^\d+(\.\d+)?$/.test(r.budget), `numeric or empty: ${r.budget}`);
+    // "3800 ש״ח" and "13000" are clear amounts
+    assert.ok(d.rows.some((r) => r.budget === "3800"));
+    assert.ok(d.rows.some((r) => r.budget === "13000"));
+    // texts with words/formulas are preserved word for word in notes
+    for (const txt of ["אירוע: 12,000 ש״ח", "300 ש״ח * 150 בחינות", "800$ ל-1000 באדג׳ים", "12000צפי הכנסה"]) {
+      assert.ok(d.rows.some((r) => (r.notes || "").includes(`תקציב (טקסט מקורי): ${txt}`)), txt);
+    }
+  });
+  test("ההמרה רצה פעם אחת בלבד – קריאה נוספת לא משכפלת הערות", async () => {
+    const t = await adminToken();
+    const a = (await call("GET", "year/2026", null, t)).data;
+    const b = (await call("GET", "year/2026", null, t)).data;
+    assert.deepEqual(b.rows.map((r) => r.notes), a.rows.map((r) => r.notes));
+  });
+  test("שמירה: טקסט נדחה, סכום עם פסיקים או ₪ נשמר כמספר, ריק מנקה", async () => {
+    const t = await adminToken();
+    const id = (await call("GET", "year/2027", null, t)).data.rows[0].id;
+    let r = await call("PUT", `year/2027/row/${id}`, { budget: "בערך אלף" }, t);
+    assert.equal(r.status, 400); assert.match(r.data.error, /מספר/);
+    assert.equal((await call("PUT", `year/2027/row/${id}`, { budget: "-50" }, t)).status, 400);
+    r = await call("PUT", `year/2027/row/${id}`, { budget: "₪ 12,500" }, t);
+    assert.equal(r.data.rows.find((x) => x.id === id).budget, "12500");
+    r = await call("PUT", `year/2027/row/${id}`, { budget: "" }, t);
+    assert.equal(r.data.rows.find((x) => x.id === id).budget, "");
+  });
+  test("שנה חדשה (ריקה או מועתקת) כבר מסומנת כמספרית", async () => {
+    const t = await adminToken();
+    await call("POST", "years", { year: "2028", copyFrom: "2027" }, t);
+    const d = (await call("GET", "year/2028", null, t)).data;
+    assert.equal(d.budgetNumeric, true);
+    assert.ok(d.rows.every((r) => r.budget === "" || /^\d+(\.\d+)?$/.test(r.budget)));
+  });
+});

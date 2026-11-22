@@ -1,6 +1,6 @@
 /* ITCB marketing plan – client */
 (() => {
-  const VERSION = "1.8.1";
+  const VERSION = "1.9.0";
   const STATUSES = ["לא החל", "בעבודה", "הסתיים", "הועבר לשנה אחרי", "בוטל"];
   const ROLE_LABEL = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
   const COLS = [
@@ -44,6 +44,64 @@
   function num(s) {
     const t = String(s || "").replace(/[,\s₪]/g, "").replace(/ש״ח|ש"ח/g, "");
     return /^-?\d+(\.\d+)?$/.test(t) ? parseFloat(t) : null;
+  }
+  const shekel = (n) => `<bdi dir="ltr">${n < 0 ? "−" : ""}₪${Math.abs(Math.round(n)).toLocaleString("he-IL")}</bdi>`;
+  const money = (v) => { const n = num(v); return n === null ? esc(v) : shekel(n); };
+  const MONEY = [["budget", "תקציב מתוכנן", "#5160D8"], ["expense", "הוצאה בפועל", "#F06A2C"], ["income", "הכנסה בפועל", "#0F9488"]];
+  function moneyTotals(rows) {
+    const t = { budget: 0, expense: 0, income: 0, budN: 0 };
+    rows.forEach((r) => { for (const [k] of MONEY) t[k] += num(r[k]) || 0; if ((num(r.budget) || 0) > 0) t.budN++; });
+    return t;
+  }
+  // three money cards; prev = totals of the previous year (optional) for the change line
+  function moneyCards(t, label, prev, prevY) {
+    const d = (k) => {
+      if (!prev) return "";
+      const diff = t[k] - prev[k];
+      if (!diff) return `<div class="sub delta-line">ללא שינוי לעומת ${prevY}</div>`;
+      return `<div class="sub delta-line">${diff > 0 ? "▲" : "▼"} ${shekel(Math.abs(diff))} לעומת ${prevY}</div>`;
+    };
+    return `<div class="kpis money-row" aria-label="סיכום כספי ${esc(label)}">
+      <div class="kpi money" data-k="budget"><div class="lbl">תקציב מתוכנן</div><div class="val">${shekel(t.budget)}</div>
+        <div class="sub">${t.budN} משימות עם תקציב</div>${d("budget")}</div>
+      <div class="kpi money" data-k="expense"><div class="lbl">הוצאה בפועל</div><div class="val">${shekel(t.expense)}</div>
+        <div class="sub">${t.budget ? `${Math.round((t.expense / t.budget) * 100)}% מהתקציב · יתרה ${shekel(t.budget - t.expense)}` : "&nbsp;"}</div>${d("expense")}</div>
+      <div class="kpi money" data-k="income"><div class="lbl">הכנסה בפועל</div><div class="val">${shekel(t.income)}</div>
+        <div class="sub">${t.income || t.expense ? `מאזן (הכנסה פחות הוצאה): ${shekel(t.income - t.expense)}` : "&nbsp;"}</div>${d("income")}</div>
+    </div>`;
+  }
+  // grouped columns: one group per year, bars = budget / expense / income (SVG, RTL: earliest year on the right)
+  function moneyChart(years, focus) {
+    const data = years.map((y) => ({ y, t: moneyTotals(S.docs[y].rows) }));
+    const max = Math.max(1, ...data.flatMap((d) => MONEY.map(([k]) => d.t[k])));
+    const pow = Math.pow(10, Math.floor(Math.log10(max)));
+    const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((st) => max / st <= 5) || pow * 10;
+    const top = Math.ceil(max / step) * step;
+    const W = 1000, H = 300, padL = 64, padB = 30, padT = 18;
+    const gw = (W - padL - 8) / data.length, bw = Math.min(40, (gw * 0.6) / 3);
+    const yv = (v) => padT + (H - padT - padB) * (1 - v / top);
+    const kfmt = (v) => (v >= 1000 ? `₪${(v / 1000).toLocaleString("he-IL", { maximumFractionDigits: 1 })}K` : `₪${v}`);
+    let g = "";
+    for (let v = 0; v <= top + 1e-9; v += step) g += `<line x1="${padL}" x2="${W - 4}" y1="${yv(v)}" y2="${yv(v)}" stroke="#E7E9F1"/><text x="${padL - 8}" y="${yv(v) + 4}" text-anchor="end" class="ax">${kfmt(v)}</text>`;
+    data.forEach((d, i) => {
+      const cx = W - 8 - gw * i - gw / 2;
+      if (d.y === focus) g += `<rect x="${cx - gw / 2 + 4}" y="${padT - 8}" width="${gw - 8}" height="${H - padT - padB + 8}" rx="8" fill="#F1F2FB"/>`;
+      MONEY.forEach(([k, label, color], j) => {
+        // RTL inside the group too: budget on the right
+        const x = cx + bw * 1.5 - bw * (j + 1) + 0 - (j - 1) * 2;
+        const v = d.t[k], h = yv(0) - yv(v);
+        if (v > 0) {
+          const hh = Math.max(h, 2);
+          g += `<path class="seg" d="M${x},${yv(0)} v${-(hh - Math.min(4, hh))} q0,${-Math.min(4, hh)} ${Math.min(4, bw / 2)},${-Math.min(4, hh)} h${bw - 2 * Math.min(4, bw / 2)} q${Math.min(4, bw / 2)},0 ${Math.min(4, bw / 2)},${Math.min(4, hh)} v${hh - Math.min(4, hh)} z" fill="${color}" data-mtip="${d.y}|${label}|${v}|${color}"/>`;
+        } else {
+          g += `<line x1="${x}" x2="${x + bw}" y1="${yv(0) - 1}" y2="${yv(0) - 1}" stroke="${color}" stroke-width="2" data-mtip="${d.y}|${label}|0|${color}"/>`;
+        }
+      });
+      g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" class="ax ${d.y === focus ? "ax-on" : ""}">${d.y}</text>`;
+    });
+    const legend = `<div class="legend">${MONEY.map(([, l, c]) => `<span style="--c:${c}">${l}</span>`).join("")}</div>`;
+    const table = `<table class="simple dtable"><thead><tr><th>שנה</th>${MONEY.map(([, l]) => `<th>${l}</th>`).join("")}<th>מאזן</th><th>ניצול תקציב</th></tr></thead><tbody>${data.map((d) => `<tr><td><b>${d.y}</b></td>${MONEY.map(([k]) => `<td>${shekel(d.t[k])}</td>`).join("")}<td>${shekel(d.t.income - d.t.expense)}</td><td>${d.t.budget ? Math.round((d.t.expense / d.t.budget) * 100) + "%" : "—"}</td></tr>`).join("")}</tbody></table>`;
+    return { svg: `<svg viewBox="0 0 ${W} ${H}" class="cols" role="img" aria-label="תקציב, הוצאה והכנסה לפי שנה">${g}</svg>${legend}`, table };
   }
   const canEdit = () => S.user && (S.user.role === "admin" || S.user.role === "editor");
   const isAdmin = () => S.user && S.user.role === "admin";
@@ -319,8 +377,8 @@
         <div class="kpi"><div class="lbl">בעבודה</div><div class="val" style="color:var(--work)">${c["בעבודה"]}</div></div>
         <div class="kpi"><div class="lbl">לא החל</div><div class="val" style="color:var(--todo)">${c["לא החל"]}</div></div>
         <div class="kpi"><div class="lbl">הועבר לשנה אחרי</div><div class="val" style="color:var(--moved)">${c["הועבר לשנה אחרי"]}</div></div>
-        <div class="kpi"><div class="lbl">הכנסה / הוצאה בפועל</div><div class="val" style="font-size:19px;margin-top:6px">${inc ? "₪" + inc.toLocaleString("he-IL") : "—"} <small>/</small> ${exp ? "₪" + exp.toLocaleString("he-IL") : "—"}</div></div>
       </div>
+      ${moneyCards(moneyTotals(doc.rows), y)}
       <div class="toolbar">
         <input class="input search" id="fq" placeholder="חיפוש בכל השדות…" value="${esc(f.q)}">
         <select class="input" id="fp" aria-label="קדימות"><option value="">כל הקדימויות</option>${colValues(doc.rows, "priority").map((p) => `<option value="${esc(p)}" ${f.cols.priority === p ? "selected" : ""}>קדימות ${esc(p)}</option>`).join("")}</select>
@@ -460,7 +518,7 @@
         <td>${canEdit()
           ? `<select class="pill pill-select ${stClass(r.status)}" data-id="${esc(r.id)}" aria-label="סטטוס">${statusOptions(r.status)}</select>`
           : `<span class="pill ${stClass(r.status)}">${esc(r.status || "—")}</span>`}</td>
-        <td><div class="clamp" style="max-width:170px">${esc(r.budget)}</div></td>
+        <td class="nowrap col-budget">${money(r.budget)}</td>
         <td class="nowrap">${esc(r.owner)}</td>
         <td><div class="clamp nowrap">${esc(r.date)}</div></td>
         <td>${r.priority ? `<span class="prio p${esc(r.priority)}">${esc(r.priority)}</span>` : ""}</td>
@@ -503,7 +561,7 @@
           <div class="field"><label>סיום ביצוע <span class="muted" style="font-weight:400">· לגאנט</span></label><input class="input" type="date" name="endDate" value="${esc(r.endDate)}"></div>
         </div>
         <p class="audit" style="margin:-6px 0 12px">בגאנט: אם הוזנו תאריכי התחלה וסיום, המשימה תוצג לפיהם. אחרת היא תוצג לפי החודשים שבשדה "תאריך מתוכנן".</p>
-        <div class="field"><label>תקציב</label><textarea class="input" name="budget" rows="2">${esc(r.budget)}</textarea></div>
+        <div class="field"><label>תקציב (₪)</label><input class="input" name="budget" type="number" inputmode="decimal" min="0" step="any" dir="ltr" placeholder="סכום בש״ח, למשל 12000" value="${esc(num(r.budget) ?? "")}"></div>
         <div class="grid2">
           <div class="field"><label>הכנסה בפועל</label><input class="input" name="income" value="${esc(r.income)}"></div>
           <div class="field"><label>הוצאה בפועל</label><input class="input" name="expense" value="${esc(r.expense)}"></div>
@@ -628,11 +686,11 @@
     const cards = S.years.map((y) => {
       const d = S.docs[y]; const c = counts(d.rows);
       const pct = c.total ? Math.round((c["הסתיים"] / c.total) * 100) : 0;
-      const inc = d.rows.reduce((a, r) => a + (num(r.income) || 0), 0);
+      const mt = moneyTotals(d.rows);
       return `<div class="kpi progress" style="cursor:pointer" data-go="${y}"><div class="lbl">${y}</div>
         <div class="val">${pct}% <small>הושלמו · ${c.total} משימות</small></div>${stackBar(c)}
         <div class="legend"><span style="--c:var(--done)">הסתיים ${c["הסתיים"]}</span><span style="--c:#E08A00">בעבודה ${c["בעבודה"]}</span><span style="--c:var(--moved)">הועבר ${c["הועבר לשנה אחרי"]}</span><span style="--c:#A3A8C0">לא החל ${c["לא החל"]}</span></div>
-        ${inc ? `<div class="audit">הכנסה בפועל: ₪${inc.toLocaleString("he-IL")}</div>` : ""}</div>`;
+        <div class="cmp-money">${MONEY.map(([k, l, col]) => `<div data-k="${k}"><span class="sw" style="background:${col}"></span>${l}<b>${shekel(mt[k])}</b></div>`).join("")}</div></div>`;
     }).join("");
     // sections by title across years
     const titles = [];
@@ -643,7 +701,10 @@
       const c = counts(d.rows.filter((r) => r.sectionId === sec.id));
       return `<td><div style="display:flex;align-items:center;gap:8px">${stackBar(c, "cmp-bar")}<span class="nowrap muted">${c["הסתיים"]}/${c.total}</span></div></td>`;
     }).join("")}</tr>`).join("");
+    const mc3 = moneyChart(S.years, null);
     m.innerHTML = `<div class="cmp-cards">${cards}</div>
+      <div class="panel" id="cmpMoney"><h2>סיכום כספי לפי שנה</h2><p class="hint">תקציב מתוכנן, הוצאה בפועל והכנסה בפועל בכל שנה</p>
+        <div style="overflow-x:auto">${mc3.table}</div></div>
       <div class="panel"><h2>התקדמות לפי סעיף</h2><p class="hint">משימות שהושלמו מתוך כלל המשימות בכל סעיף, לפי שנה</p>
       <div style="overflow-x:auto"><table class="simple"><thead><tr><th>סעיף</th>${S.years.map((y) => `<th>${y}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
       <div class="legend" style="margin-top:12px">${["הסתיים", "בעבודה", "הועבר לשנה אחרי", "לא החל"].map((s) => `<span style="--c:${stColor[s]}">${s}</span>`).join("")}</div></div>`;
@@ -909,10 +970,16 @@
     let tip = document.getElementById("dtip");
     if (!tip) { tip = document.createElement("div"); tip.id = "dtip"; document.body.appendChild(tip); }
     root.addEventListener("mousemove", (e) => {
-      const t = e.target.closest("[data-tip]");
+      const mt = e.target.closest("[data-mtip]");
+      const t = mt || e.target.closest("[data-tip]");
       if (!t) { tip.style.opacity = 0; return; }
-      const [lbl, st, n, tot] = t.dataset.tip.split("|");
-      tip.innerHTML = `<div class="tt-l">${esc(lbl)}</div><div class="tt-r"><span class="sw" style="background:${stColor[st]}"></span>${esc(st)} <b>${n}</b> <span class="muted">מתוך ${tot}</span></div>`;
+      if (mt) {
+        const [yy, lbl, v, color] = mt.dataset.mtip.split("|");
+        tip.innerHTML = `<div class="tt-l">${esc(yy)}</div><div class="tt-r"><span class="sw" style="background:${color}"></span>${esc(lbl)} <b>${shekel(Number(v))}</b></div>`;
+      } else {
+        const [lbl, st, n, tot] = t.dataset.tip.split("|");
+        tip.innerHTML = `<div class="tt-l">${esc(lbl)}</div><div class="tt-r"><span class="sw" style="background:${stColor[st]}"></span>${esc(st)} <b>${n}</b> <span class="muted">מתוך ${tot}</span></div>`;
+      }
       tip.style.opacity = 1;
       const x = Math.min(window.innerWidth - tip.offsetWidth - 10, e.clientX + 14);
       tip.style.left = Math.max(10, x) + "px"; tip.style.top = (e.clientY + 16) + "px";
@@ -951,8 +1018,9 @@
         <div class="kpi"><div class="lbl">הסתיים</div><div class="val">${c["הסתיים"]}</div></div>
         <div class="kpi"><div class="lbl">בעבודה</div><div class="val">${c["בעבודה"]}</div></div>
         <div class="kpi"><div class="lbl">לא החל / הועבר</div><div class="val">${c["לא החל"]} <small>/</small> ${c["הועבר לשנה אחרי"]}</div></div>
-        <div class="kpi"><div class="lbl">הכנסה בפועל</div><div class="val">${inc ? "₪" + inc.toLocaleString("he-IL") : "—"}</div></div>
       </div>
+      ${moneyCards(moneyTotals(doc.rows), y, prevY ? moneyTotals(S.docs[prevY].rows) : null, prevY)}
+      ${(() => { const mc2 = moneyChart(S.years, y); return chartCard("ch-money", "תקציב, הוצאה והכנסה לפי שנה", `השוואה בין כל השנים · השנה הנבחרת (${y}) מודגשת`, mc2.svg, mc2.table); })()}
       ${chartCard("ch-sec", "התקדמות לפי סעיפים", `הושלמו מתוך כלל המשימות בכל סעיף · ${y}`, hbars(secB.map((b) => ({ ...b, label: b.short })), { pct: true }) + legendHtml(c), tableOf(secB.map((b) => ({ ...b, label: b.short })), "סעיף"))}
       <div class="dgrid">
         ${chartCard("ch-month", "פריסה לפי חודש מתוכנן", `${mc.undated ? `${mc.undated} משימות ללא תאריך מתוכנן ב-${y} לא מוצגות` : "כל המשימות מתוזמנות"}`, mc.svg + legendHtml(c), tableOf(mc.data.map((d) => ({ label: d.name, c: d.c })), "חודש"))}

@@ -64,7 +64,7 @@ main{max-width:1500px;margin:0 auto;padding:22px 24px 40px}
 footer.ver{text-align:center;color:var(--ink-3);font-size:12px;padding:10px 0 24px}
 
 /* ---------- KPIs ---------- */
-.kpis{display:grid;grid-template-columns:2fr repeat(5,1fr);gap:12px;margin-bottom:18px}
+.kpis{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:12px;margin-bottom:18px}
 .kpi{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px}
 .kpi .lbl{font-size:13px;color:var(--ink-3);font-weight:600}
 .kpi .val{font-size:26px;font-weight:800;margin-top:2px}
@@ -317,3 +317,17 @@ body.no-scroll{overflow:hidden}
   .dash-top{flex-wrap:wrap}
   .toolbar .search{min-width:0;max-width:none;flex-basis:100%}
 }
+
+/* money summary (v1.9) */
+.kpis.money-row{grid-template-columns:repeat(3,1fr);margin-top:-6px}
+.kpi.money{border-top:3px solid #5160D8}
+.kpi.money[data-k="expense"]{border-top-color:#F06A2C}
+.kpi.money[data-k="income"]{border-top-color:#0F9488}
+.kpi .sub{font-size:12.5px;color:var(--ink-3);margin-top:2px;font-weight:600}
+@media (max-width:760px){.kpis.money-row{grid-template-columns:1fr}}
+.delta-line{color:var(--ink-2)}
+svg.cols .ax-on{fill:var(--navy);font-weight:800}
+.cmp-money{display:grid;gap:4px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.cmp-money div{display:flex;align-items:center;gap:6px}.cmp-money b{margin-inline-start:auto;color:var(--ink)}
+svg.cols{direction:ltr}
+#ch-money svg.cols{max-height:340px}

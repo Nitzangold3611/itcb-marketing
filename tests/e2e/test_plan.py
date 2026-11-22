@@ -129,3 +129,44 @@ def test_add_year_copies_tasks_with_reset_status(admin_page):
     p.wait_for_selector("select.pill-select")
     statuses = set(p.locator("select.pill-select").evaluate_all("els => els.map(e => e.value)"))
     assert statuses == {"לא החל"}, statuses
+
+
+def _sum(rows, k):
+    import re as _re
+    tot = 0
+    for r in rows:
+        t = _re.sub(r"[,\s₪]|ש״ח|ש\"ח", "", str(r.get(k) or ""))
+        if _re.fullmatch(r"-?\d+(\.\d+)?", t):
+            tot += float(t)
+    return round(tot)
+
+
+def _shekel(n):
+    return ("−" if n < 0 else "") + "₪" + f"{abs(round(n)):,}"
+
+
+def test_money_summary_shows_budget_expense_income(admin_page):
+    p = admin_page
+    for y in ["2025", "2026", "2027"]:
+        goto_tab(p, y)
+        rows = api(p, "GET", f"year/{y}")["data"]["rows"]
+        expect(p.locator(".kpi.money[data-k=budget] .val")).to_have_text(_shekel(_sum(rows, "budget")))
+        expect(p.locator(".kpi.money[data-k=expense] .val")).to_have_text(_shekel(_sum(rows, "expense")))
+        expect(p.locator(".kpi.money[data-k=income] .val")).to_have_text(_shekel(_sum(rows, "income")))
+    shot(p, "money-summary-2027")
+
+
+def test_budget_field_is_numeric_and_updates_total(admin_page):
+    p = admin_page
+    goto_tab(p, "2027")
+    before = _sum(api(p, "GET", "year/2027")["data"]["rows"], "budget")
+    rid = p.locator("tr.row").nth(1).get_attribute("data-id")
+    old = _sum([r for r in api(p, "GET", "year/2027")["data"]["rows"] if r["id"] == rid], "budget")
+    p.click(f"[data-editrow='{rid}']")
+    field = p.locator("[name=budget]")
+    expect(field).to_have_attribute("type", "number")
+    field.fill("5000")
+    p.click("[data-save]")
+    expect(p.locator(".kpi.money[data-k=budget] .val")).to_have_text(_shekel(before - old + 5000))
+    expect(p.locator(f"tr.row[data-id='{rid}'] td.col-budget")).to_have_text("₪5,000")
+    shot(p, "budget-edit")

@@ -9,7 +9,7 @@ type Role = "admin" | "editor" | "viewer";
 interface User { username: string; name: string; phone?: string; mustChange?: boolean; role: Role; salt: string; hash: string; createdAt: string; lastLogin?: string }
 interface Section { id: string; title: string; detail: string }
 interface Row { id: string; sectionId: string; [k: string]: string }
-interface YearDoc { sections: Section[]; rows: Row[]; updatedAt?: string; updatedBy?: string }
+interface YearDoc { sections: Section[]; rows: Row[]; updatedAt?: string; updatedBy?: string; budgetNumeric?: boolean }
 
 const ROW_FIELDS = ["task", "taskDetail", "updates", "status", "budget", "owner", "date", "priority", "income", "expense", "notes", "sectionId", "startDate", "endDate"];
 const SESSION_HOURS = 24 * 14;
@@ -73,10 +73,32 @@ async function getYears(): Promise<string[]> {
   }
   return years;
 }
+// "13,000 ש״ח" / "₪3800" / " 2500 " -> "13000" / "3800" / "2500"; anything else (words, formulas, $) -> null
+function normalizeMoney(v: string): string | null {
+  const t = String(v ?? "").replace(/[,\s₪]/g, "").replace(/ש״ח|ש"ח|שח|ש''ח/g, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
+  return String(Number(t));
+}
+// One-time move to numeric budgets: clear amounts become numbers, any other text moves to notes unchanged.
+function migrateBudgets(doc: YearDoc): boolean {
+  if (doc.budgetNumeric) return false;
+  for (const r of doc.rows) {
+    const b = (r.budget || "").trim();
+    if (!b) { r.budget = ""; continue; }
+    const n = normalizeMoney(b);
+    if (n !== null) { r.budget = n; continue; }
+    r.notes = [r.notes, `תקציב (טקסט מקורי): ${b}`].filter((x) => x && x.trim()).join("\n");
+    r.budget = "";
+  }
+  doc.budgetNumeric = true;
+  return true;
+}
 async function getYear(y: string): Promise<YearDoc | null> {
   const years = await getYears();
   if (!years.includes(y)) return null;
-  return (await store().get(`year-${y}`, { type: "json" })) as YearDoc | null;
+  const doc = (await store().get(`year-${y}`, { type: "json" })) as YearDoc | null;
+  if (doc && migrateBudgets(doc)) await store().setJSON(`year-${y}`, doc);
+  return doc;
 }
 const saveYear = (y: string, doc: YearDoc, by: string) => {
   doc.updatedAt = new Date().toISOString();
@@ -188,10 +210,11 @@ export default async (req: Request, context: Context) => {
         if (!/^20\d\d$/.test(y)) return err("שנה לא תקינה");
         const years = await getYears();
         if (years.includes(y)) return err("השנה כבר קיימת");
-        let doc: YearDoc = { sections: [], rows: [] };
+        let doc: YearDoc = { sections: [], rows: [], budgetNumeric: true };
         if (body.copyFrom && years.includes(body.copyFrom)) {
           const src = (await getYear(body.copyFrom))!;
           doc = {
+            budgetNumeric: true,
             sections: src.sections.map((s) => ({ ...s })),
             rows: src.rows.map((r) => ({
               ...r, id: randomUUID(), status: "לא החל", income: "", expense: "",
@@ -228,6 +251,11 @@ export default async (req: Request, context: Context) => {
           if (!row) row = { id, sectionId: "" } as Row;
           const prevSection = row.sectionId;
           const prevTask = row.task;
+          if (body.budget !== undefined && String(body.budget).trim() !== "") {
+            const n = normalizeMoney(clean(body.budget, 100));
+            if (n === null) return err("התקציב חייב להיות מספר (סכום בש״ח)");
+            body.budget = n;
+          }
           for (const f of ROW_FIELDS) if (body[f] !== undefined) row[f] = clean(body[f]);
           if (!doc.sections.some((s) => s.id === row!.sectionId)) return err("יש לבחור סעיף");
           for (const f of ["startDate", "endDate"]) if (row[f] && !/^\d{4}-\d{2}-\d{2}$/.test(row[f])) return err("תאריך לא תקין");
