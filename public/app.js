@@ -1,6 +1,6 @@
 /* ITCB marketing plan – client */
 (() => {
-  const VERSION = "1.9.1";
+  const VERSION = "1.9.2";
   const STATUSES = ["לא החל", "בעבודה", "הסתיים", "הועבר לשנה אחרי", "בוטל"];
   const ROLE_LABEL = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
   const COLS = [
