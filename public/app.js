@@ -1,6 +1,6 @@
 /* ITCB marketing plan – client */
 (() => {
-  const VERSION = "1.9.2";
+  const VERSION = "1.9.3";
   const STATUSES = ["לא החל", "בעבודה", "הסתיים", "הועבר לשנה אחרי", "בוטל"];
   const ROLE_LABEL = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
   const COLS = [
@@ -72,8 +72,17 @@
     </div>`;
   }
   // grouped columns: one group per year, bars = budget / expense / income (SVG, RTL: earliest year on the right)
+  // money views (dashboard, compare) can be narrowed to one priority
+  const moneyRows = (y) => S.docs[y].rows.filter((r) => !S.moneyPrio || (S.moneyPrio === "none" ? !r.priority : String(r.priority) === S.moneyPrio));
+  function moneyPrioSelect() {
+    const all = [...new Set(S.years.flatMap((y) => (S.docs[y] ? S.docs[y].rows : []).map((r) => r.priority).filter(Boolean)))].sort();
+    return `<label class="mprio"><span>סינון לפי קדימות</span><select class="input" data-mprio aria-label="סינון הסיכום הכספי לפי קדימות">
+      <option value="">כל הקדימויות</option>${all.map((p) => `<option value="${esc(p)}" ${S.moneyPrio === p ? "selected" : ""}>קדימות ${esc(p)}</option>`).join("")}
+      <option value="none" ${S.moneyPrio === "none" ? "selected" : ""}>ללא קדימות</option></select></label>`;
+  }
+  const moneyPrioNote = () => (S.moneyPrio ? ` · ${S.moneyPrio === "none" ? "משימות ללא קדימות" : `קדימות ${esc(S.moneyPrio)} בלבד`}` : "");
   function moneyChart(years, focus) {
-    const data = years.map((y) => ({ y, t: moneyTotals(S.docs[y].rows) }));
+    const data = years.map((y) => ({ y, t: moneyTotals(moneyRows(y)) }));
     const max = Math.max(1, ...data.flatMap((d) => MONEY.map(([k]) => d.t[k])));
     const pow = Math.pow(10, Math.floor(Math.log10(max)));
     const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((st) => max / st <= 5) || pow * 10;
@@ -182,6 +191,7 @@
       const ys = await api("years");
       S.years = ys.years;
       S.sort = store.get("itcb_sort") || "plan";
+      S.moneyPrio = store.get("itcb_mprio") || "";
       const saved = store.get("itcb_view");
       const thisYear = String(new Date().getFullYear());
       S.view = saved && (S.years.includes(saved) || ["compare", "users", "dash", "gantt"].includes(saved)) ? saved
@@ -690,11 +700,12 @@
     const cards = S.years.map((y) => {
       const d = S.docs[y]; const c = counts(d.rows);
       const pct = c.total ? Math.round((c["הסתיים"] / c.total) * 100) : 0;
-      const mt = moneyTotals(d.rows);
+      const mt = moneyTotals(moneyRows(y));
       return `<div class="kpi progress" style="cursor:pointer" data-go="${y}"><div class="lbl">${y}</div>
         <div class="val">${pct}% <small>הושלמו · ${c.total} משימות</small></div>${stackBar(c)}
         <div class="legend"><span style="--c:var(--done)">הסתיים ${c["הסתיים"]}</span><span style="--c:#E08A00">בעבודה ${c["בעבודה"]}</span><span style="--c:var(--moved)">הועבר ${c["הועבר לשנה אחרי"]}</span><span style="--c:#A3A8C0">לא החל ${c["לא החל"]}</span></div>
-        <div class="cmp-money">${MONEY.map(([k, l, col]) => `<div data-k="${k}"><span class="sw" style="background:${col}"></span>${l}<b>${shekel(mt[k])}</b></div>`).join("")}</div></div>`;
+        <div class="cmp-money">${MONEY.map(([k, l, col]) => `<div data-k="${k}"><span class="sw" style="background:${col}"></span>${l}<b>${shekel(mt[k])}</b></div>`).join("")}
+        ${S.moneyPrio ? `<div class="filt-line cmp-filt">לפי הסינון${moneyPrioNote()}</div>` : ""}</div></div>`;
     }).join("");
     // sections by title across years
     const titles = [];
@@ -707,12 +718,13 @@
     }).join("")}</tr>`).join("");
     const mc3 = moneyChart(S.years, null);
     m.innerHTML = `<div class="cmp-cards">${cards}</div>
-      <div class="panel" id="cmpMoney"><h2>סיכום כספי לפי שנה</h2><p class="hint">תקציב מתוכנן, הוצאה בפועל והכנסה בפועל בכל שנה</p>
+      <div class="panel" id="cmpMoney"><div class="money-head"><h2>סיכום כספי לפי שנה${moneyPrioNote()}</h2>${moneyPrioSelect()}</div><p class="hint">תקציב מתוכנן, הוצאה בפועל והכנסה בפועל בכל שנה</p>
         <div style="overflow-x:auto">${mc3.table}</div></div>
       <div class="panel"><h2>התקדמות לפי סעיף</h2><p class="hint">משימות שהושלמו מתוך כלל המשימות בכל סעיף, לפי שנה</p>
       <div style="overflow-x:auto"><table class="simple"><thead><tr><th>סעיף</th>${S.years.map((y) => `<th>${y}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
       <div class="legend" style="margin-top:12px">${["הסתיים", "בעבודה", "הועבר לשנה אחרי", "לא החל"].map((s) => `<span style="--c:${stColor[s]}">${s}</span>`).join("")}</div></div>`;
     m.onclick = (e) => { const g = e.target.closest("[data-go]"); if (g) go(g.dataset.go); };
+    m.onchange = (e) => { if (e.target.matches("[data-mprio]")) { S.moneyPrio = e.target.value; store.set("itcb_mprio", S.moneyPrio); renderCompare(m); } };
   }
 
   // ---------- users ----------
@@ -1023,8 +1035,9 @@
         <div class="kpi"><div class="lbl">בעבודה</div><div class="val">${c["בעבודה"]}</div></div>
         <div class="kpi"><div class="lbl">לא החל / הועבר</div><div class="val">${c["לא החל"]} <small>/</small> ${c["הועבר לשנה אחרי"]}</div></div>
       </div>
-      ${moneyCards(moneyTotals(doc.rows), y, prevY ? moneyTotals(S.docs[prevY].rows) : null, prevY)}
-      ${(() => { const mc2 = moneyChart(S.years, y); return chartCard("ch-money", "תקציב, הוצאה והכנסה לפי שנה", `השוואה בין כל השנים · השנה הנבחרת (${y}) מודגשת`, mc2.svg, mc2.table); })()}
+      <div class="money-head"><h2>סיכום כספי ${esc(y)}${moneyPrioNote()}</h2>${moneyPrioSelect()}</div>
+      ${moneyCards(moneyTotals(moneyRows(y)), y, prevY ? moneyTotals(moneyRows(prevY)) : null, prevY)}
+      ${(() => { const mc2 = moneyChart(S.years, y); return chartCard("ch-money", "תקציב, הוצאה והכנסה לפי שנה", `השוואה בין כל השנים · השנה הנבחרת (${y}) מודגשת${moneyPrioNote()}`, mc2.svg, mc2.table); })()}
       ${chartCard("ch-sec", "התקדמות לפי סעיפים", `הושלמו מתוך כלל המשימות בכל סעיף · ${y}`, hbars(secB.map((b) => ({ ...b, label: b.short })), { pct: true }) + legendHtml(c), tableOf(secB.map((b) => ({ ...b, label: b.short })), "סעיף"))}
       <div class="dgrid">
         ${chartCard("ch-month", "פריסה לפי חודש מתוכנן", `${mc.undated ? `${mc.undated} משימות ללא תאריך מתוכנן ב-${y} לא מוצגות` : "כל המשימות מתוזמנות"}`, mc.svg + legendHtml(c), tableOf(mc.data.map((d) => ({ label: d.name, c: d.c })), "חודש"))}
@@ -1038,6 +1051,7 @@
       if (tb) { const card = document.getElementById(tb); const on = card.querySelector(".dtbl").classList.toggle("hidden"); card.querySelector(".dchart").classList.toggle("hidden", !on); e.target.textContent = on ? "הצגה כטבלה" : "הצגה כגרף"; }
       if (e.target.id === "presentBtn") openPresentation(y);
     };
+    m.onchange = (e) => { if (e.target.matches("[data-mprio]")) { S.moneyPrio = e.target.value; store.set("itcb_mprio", S.moneyPrio); renderDash(m); } };
   }
 
   // ---------- presentation ----------

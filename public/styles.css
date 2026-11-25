@@ -345,3 +345,11 @@ svg.cols{direction:ltr}
   .pr-bar .pr-count{order:5;min-width:56px}
   .slide-wrap{padding:10px}
 }
+
+/* money priority filter (v1.9.3) */
+.money-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 10px}
+.money-head h2{font-size:17px;margin:0;flex:1}
+.panel .money-head h2{font-size:19px}
+.mprio{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink-2)}
+.mprio select.input{width:auto;min-width:150px;padding:6px 10px}
+.cmp-filt{font-size:12px;font-weight:600}

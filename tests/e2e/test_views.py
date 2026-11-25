@@ -142,3 +142,69 @@ def test_compare_shows_money_per_year(admin_page):
             expect(card.locator(f".cmp-money [data-k={k}] b")).to_have_text(_shekel(_money(rows, k)))
     expect(p.locator("#cmpMoney tbody tr")).to_have_count(len(years))
     shot(p, "compare-money", full_page=True)
+
+
+def _seed_money_by_priority(p):
+    """Give one task of every priority (and one without) a budget/expense/income in each year."""
+    for y in api(p, "GET", "years")["data"]["years"]:
+        seen = set()
+        for r in api(p, "GET", f"year/{y}")["data"]["rows"]:
+            key = r.get("priority") or "none"
+            if key in seen:
+                continue
+            seen.add(key)
+            n = len(seen)
+            assert api(p, "PUT", f"year/{y}/row/{r['id']}", {"budget": str(1000 * n), "expense": str(100 * n), "income": str(10 * n)})["status"] == 200
+
+
+def _rows_for(p, y, prio):
+    rows = api(p, "GET", f"year/{y}")["data"]["rows"]
+    if prio == "none":
+        return [r for r in rows if not r.get("priority")]
+    return [r for r in rows if not prio or str(r.get("priority")) == prio]
+
+
+def test_dashboard_money_filter_by_priority(admin_page):
+    p = admin_page
+    _seed_money_by_priority(p)
+    goto_tab(p, "dash")
+    years = api(p, "GET", "years")["data"]["years"]
+    y = years[-1]
+    p.click(f"[data-dy='{y}']")
+    opts = p.locator("[data-mprio] option").evaluate_all("os => os.map(o => o.value)")
+    assert opts[0] == "" and "1" in opts and opts[-1] == "none", opts
+    for prio in [o for o in opts if o] + [""]:
+        p.select_option("[data-mprio]", prio)
+        rows = _rows_for(p, y, prio)
+        for k in ("budget", "expense", "income"):
+            expect(p.locator(f".kpi.money[data-k={k}] .val")).to_have_text(_shekel(_money(rows, k)))
+        # the per-year chart/table follows the same filter
+        p.click("[data-tbl='ch-money']")
+        first = _rows_for(p, years[0], prio)
+        expect(p.locator("#ch-money .dtbl tbody tr").first.locator("td").nth(1)).to_have_text(_shekel(_money(first, "budget")))
+        p.click("[data-tbl='ch-money']")
+        if prio == "1":
+            expect(p.locator(".money-head h2")).to_contain_text("קדימות 1 בלבד")
+            shot(p, "dashboard-money-priority-1", full_page=True)
+    expect(p.locator(".money-head h2")).not_to_contain_text("בלבד")
+
+
+def test_money_priority_choice_is_shared_and_remembered(admin_page):
+    p = admin_page
+    _seed_money_by_priority(p)
+    goto_tab(p, "dash")
+    p.select_option("[data-mprio]", "2")
+    goto_tab(p, "compare")
+    expect(p.locator("#cmpMoney [data-mprio]")).to_have_value("2")
+    years = api(p, "GET", "years")["data"]["years"]
+    for i, y in enumerate(years):
+        rows = _rows_for(p, y, "2")
+        expect(p.locator("#cmpMoney tbody tr").nth(i).locator("td").nth(1)).to_have_text(_shekel(_money(rows, "budget")))
+        expect(p.locator(".cmp-cards .kpi").nth(i).locator(".cmp-money [data-k=expense] b")).to_have_text(_shekel(_money(rows, "expense")))
+    shot(p, "compare-money-priority-2", full_page=True)
+    p.reload()
+    p.wait_for_selector("#cmpMoney")
+    expect(p.locator("#cmpMoney [data-mprio]")).to_have_value("2")
+    p.select_option("#cmpMoney [data-mprio]", "")
+    rows = _rows_for(p, years[0], "")
+    expect(p.locator("#cmpMoney tbody tr").first.locator("td").nth(1)).to_have_text(_shekel(_money(rows, "budget")))
