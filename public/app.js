@@ -1,6 +1,6 @@
 /* ITCB marketing plan – client */
 (() => {
-  const VERSION = "1.9.3";
+  const VERSION = "1.9.4";
   const STATUSES = ["לא החל", "בעבודה", "הסתיים", "הועבר לשנה אחרי", "בוטל"];
   const ROLE_LABEL = { admin: "מנהל", editor: "עורך", viewer: "צופה" };
   const COLS = [
@@ -18,7 +18,7 @@
   };
   const S = {
     token: store.get("itcb_token"), user: null, years: [], view: null, docs: {},
-    filters: { q: "", cols: {}, section: "" }, sort: "plan", showColFilters: false, collapsed: new Set(), users: [],
+    filters: { q: "", cols: {}, section: "" }, treeOpen: new Set(), treeAll: false, sort: "plan", showColFilters: false, collapsed: new Set(), users: [],
   };
 
   // ---------- utils ----------
@@ -81,6 +81,62 @@
       <option value="none" ${S.moneyPrio === "none" ? "selected" : ""}>ללא קדימות</option></select></label>`;
   }
   const moneyPrioNote = () => (S.moneyPrio ? ` · ${S.moneyPrio === "none" ? "משימות ללא קדימות" : `קדימות ${esc(S.moneyPrio)} בלבד`}` : "");
+  // money breakdown: section -> task -> task detail (rows), totals at every level
+  function moneyTree(y) {
+    const doc = S.docs[y];
+    const rows = moneyRows(y);
+    const hasMoney = (t) => t.budget || t.expense || t.income;
+    const showAll = !!S.treeAll;
+    const cell = (t) => MONEY.map(([k]) => `<td class="num">${t[k] ? shekel(t[k]) : `<span class="muted">—</span>`}</td>`).join("") +
+      `<td class="num">${t.budget ? `${Math.round((t.expense / t.budget) * 100)}%` : `<span class="muted">—</span>`}</td>`;
+    let html = "", n = 0;
+    doc.sections.forEach((sec, si) => {
+      const sr = rows.filter((r) => r.sectionId === sec.id);
+      const st = moneyTotals(sr);
+      if (!showAll && !hasMoney(st)) return;
+      const sid = `t${si}`;
+      const tasks = [];
+      sr.forEach((r) => { const name = (r.task || "").trim() || "(ללא שם משימה)"; let g = tasks.find((x) => x.name === name); if (!g) tasks.push((g = { name, rows: [] })); g.rows.push(r); });
+      const open = S.treeOpen.has(sid);
+      html += `<tr class="lv1" data-node="${sid}"><td><button class="tg-btn" data-tg="${sid}" aria-expanded="${open}">${open ? "▾" : "◂"}</button><span class="sec-num sm">${si + 1}</span>${esc(sec.title.trim())}</td>${cell(st)}</tr>`;
+      tasks.forEach((g, ti) => {
+        const tt = moneyTotals(g.rows);
+        if (!showAll && !hasMoney(tt)) return;
+        const tid = `${sid}-${ti}`, topen = S.treeOpen.has(tid);
+        html += `<tr class="lv2 ${open ? "" : "hidden"}" data-parent="${sid}" data-node="${tid}" data-name="${esc(g.name)}"><td><button class="tg-btn" data-tg="${tid}" aria-expanded="${topen}">${topen ? "▾" : "◂"}</button>${esc(g.name)} <span class="muted cnt">${g.rows.length}</span></td>${cell(tt)}</tr>`;
+        g.rows.forEach((r) => {
+          const rt = moneyTotals([r]);
+          if (!showAll && !hasMoney(rt)) return;
+          const label = String(r.taskDetail || "").split("\n")[0].trim() || String(r.task || "").trim() || "—";
+          html += `<tr class="lv3 ${open && topen ? "" : "hidden"}" data-parent="${tid}" data-row="${esc(r.id)}"><td title="${esc(r.taskDetail || "")}"><span class="dot-st" style="background:${stColor[r.status] || "#999"}"></span>${esc(label)}${r.owner ? ` <span class="muted cnt">· ${esc(r.owner)}</span>` : ""}</td>${cell(rt)}</tr>`;
+          n++;
+        });
+      });
+    });
+    const tot = moneyTotals(rows);
+    return `<div class="tree-tools"><button class="btn sm" data-tree="open">פתיחת הכול</button><button class="btn sm" data-tree="close">סגירת הכול</button>
+        <label class="chk"><input type="checkbox" data-tree="all" ${showAll ? "checked" : ""}> הצגת סעיפים ומשימות בלי סכומים</label></div>
+      <div style="overflow-x:auto"><table class="simple mtree"><thead><tr><th>סעיף › משימה › פירוט</th>${MONEY.map(([, l, c]) => `<th class="num"><span class="sw" style="background:${c}"></span>${l}</th>`).join("")}<th class="num">ניצול</th></tr></thead>
+      <tbody>${html || `<tr><td colspan="5" class="empty">אין סכומים ${esc(y)}${moneyPrioNote()}</td></tr>`}</tbody>
+      <tfoot><tr><td>סה״כ ${esc(y)}${moneyPrioNote()}</td>${cell(tot)}</tr></tfoot></table></div>`;
+  }
+  function bindTree(root, y, rerender) {
+    root.querySelectorAll("[data-tree]").forEach((el) => {
+      const a = el.dataset.tree;
+      if (a === "all") el.onchange = () => { S.treeAll = el.checked; rerender(); };
+      else el.onclick = () => {
+        if (a === "open") root.querySelectorAll("[data-node]").forEach((n) => S.treeOpen.add(n.dataset.node));
+        else S.treeOpen.clear();
+        rerender();
+      };
+    });
+    root.querySelector(".mtree").onclick = (e) => {
+      const t = e.target.closest("[data-tg]");
+      if (t) { const id = t.dataset.tg; S.treeOpen.has(id) ? S.treeOpen.delete(id) : S.treeOpen.add(id); return rerender(); }
+      const r = e.target.closest("tr[data-row]");
+      if (r) openRow(y, r.dataset.row);
+    };
+  }
   function moneyChart(years, focus) {
     const data = years.map((y) => ({ y, t: moneyTotals(moneyRows(y)) }));
     const max = Math.max(1, ...data.flatMap((d) => MONEY.map(([k]) => d.t[k])));
@@ -1038,6 +1094,9 @@
       <div class="money-head"><h2>סיכום כספי ${esc(y)}${moneyPrioNote()}</h2>${moneyPrioSelect()}</div>
       ${moneyCards(moneyTotals(moneyRows(y)), y, prevY ? moneyTotals(moneyRows(prevY)) : null, prevY)}
       ${(() => { const mc2 = moneyChart(S.years, y); return chartCard("ch-money", "תקציב, הוצאה והכנסה לפי שנה", `השוואה בין כל השנים · השנה הנבחרת (${y}) מודגשת${moneyPrioNote()}`, mc2.svg, mc2.table); })()}
+      <div class="panel" id="moneyTree"><h2>פירוט כספי לפי סעיף, משימה ופירוט משימה · ${esc(y)}${moneyPrioNote()}</h2>
+        <p class="hint">לוחצים על ◂ כדי לפתוח סעיף למשימות, ומשימה לפירוט שלה. לחיצה על שורת פירוט פותחת את המשימה לעריכה.</p>
+        <div id="treeBox">${moneyTree(y)}</div></div>
       ${chartCard("ch-sec", "התקדמות לפי סעיפים", `הושלמו מתוך כלל המשימות בכל סעיף · ${y}`, hbars(secB.map((b) => ({ ...b, label: b.short })), { pct: true }) + legendHtml(c), tableOf(secB.map((b) => ({ ...b, label: b.short })), "סעיף"))}
       <div class="dgrid">
         ${chartCard("ch-month", "פריסה לפי חודש מתוכנן", `${mc.undated ? `${mc.undated} משימות ללא תאריך מתוכנן ב-${y} לא מוצגות` : "כל המשימות מתוזמנות"}`, mc.svg + legendHtml(c), tableOf(mc.data.map((d) => ({ label: d.name, c: d.c })), "חודש"))}
@@ -1052,6 +1111,9 @@
       if (e.target.id === "presentBtn") openPresentation(y);
     };
     m.onchange = (e) => { if (e.target.matches("[data-mprio]")) { S.moneyPrio = e.target.value; store.set("itcb_mprio", S.moneyPrio); renderDash(m); } };
+    const tb = document.getElementById("treeBox");
+    const rerenderTree = () => { tb.innerHTML = moneyTree(y); bindTree(tb, y, rerenderTree); };
+    bindTree(tb, y, rerenderTree);
   }
 
   // ---------- presentation ----------

@@ -208,3 +208,73 @@ def test_money_priority_choice_is_shared_and_remembered(admin_page):
     p.select_option("#cmpMoney [data-mprio]", "")
     rows = _rows_for(p, years[0], "")
     expect(p.locator("#cmpMoney tbody tr").first.locator("td").nth(1)).to_have_text(_shekel(_money(rows, "budget")))
+
+
+def test_money_breakdown_section_task_detail(admin_page):
+    p = admin_page
+    _seed_money_by_priority(p)
+    goto_tab(p, "dash")
+    y = api(p, "GET", "years")["data"]["years"][-1]
+    p.click(f"[data-dy='{y}']")
+    p.select_option("[data-mprio]", "")
+    doc = api(p, "GET", f"year/{y}")["data"]
+    tree = p.locator("#moneyTree")
+    # level 1: every section that has money, with the section total
+    sec_with_money = [(i, s) for i, s in enumerate(doc["sections"]) if any(_money([r], k) for r in doc["rows"] if r["sectionId"] == s["id"] for k in ("budget", "expense", "income"))]
+    expect(tree.locator("tr.lv1")).to_have_count(len(sec_with_money))
+    expect(tree.locator("tr.lv2:visible")).to_have_count(0)          # closed by default
+    i, sec = sec_with_money[0]
+    srows = [r for r in doc["rows"] if r["sectionId"] == sec["id"]]
+    l1 = tree.locator("tr.lv1").first
+    expect(l1.locator("td").nth(1)).to_have_text(_shekel(_money(srows, "budget")))
+    expect(l1.locator("td").nth(2)).to_have_text(_shekel(_money(srows, "expense")) if _money(srows, "expense") else "—")
+    # level 2: open the section -> its tasks with task totals
+    l1.locator("[data-tg]").click()
+    l2 = tree.locator("tr.lv2:visible").first
+    expect(l2).to_be_visible()
+    tname = l2.get_attribute("data-name")
+    trows = [r for r in srows if ((r.get("task") or "").strip() or "(ללא שם משימה)") == tname]
+    expect(l2.locator("td").nth(1)).to_have_text(_shekel(_money(trows, "budget")))
+    # level 3: open the task -> its details, each with its own amounts
+    l2.locator("[data-tg]").click()
+    l3 = tree.locator("tr.lv3:visible")
+    expect(l3.first).to_be_visible()
+    rid = l3.first.get_attribute("data-row")
+    r = next(x for x in doc["rows"] if x["id"] == rid)
+    expect(l3.first.locator("td").nth(1)).to_have_text(_shekel(_money([r], "budget")))
+    # the details of a task add up to the task, the tasks to the section, the sections to the year
+    foot = tree.locator("tfoot td")
+    expect(foot.nth(1)).to_have_text(_shekel(_money(doc["rows"], "budget")))
+    shot(p, "money-breakdown", full_page=True)
+    # clicking a detail opens the task for editing; a change there updates the tree
+    l3.first.click()
+    expect(p.locator(".drawer")).to_be_visible()
+    p.fill("[name=budget]", "777")
+    p.click("[data-save]")
+    expect(tree.locator(f"tr.lv3[data-row='{rid}'] td").nth(1)).to_have_text("₪777")
+    # open/close all
+    tree.locator("[data-tree=close]").click()
+    expect(tree.locator("tr.lv3:visible")).to_have_count(0)
+    tree.locator("[data-tree=open]").click()
+    assert tree.locator("tr.lv3:visible").count() > 1
+
+
+def test_money_breakdown_follows_priority_and_show_all(admin_page):
+    p = admin_page
+    _seed_money_by_priority(p)
+    goto_tab(p, "dash")
+    y = api(p, "GET", "years")["data"]["years"][-1]
+    p.click(f"[data-dy='{y}']")
+    p.select_option("[data-mprio]", "2")
+    tree = p.locator("#moneyTree")
+    rows = _rows_for(p, y, "2")
+    expect(tree.locator("tfoot td").nth(1)).to_have_text(_shekel(_money(rows, "budget")))
+    tree.locator("[data-tree=open]").click()
+    for rid in tree.locator("tr.lv3").evaluate_all("els => els.map(e => e.dataset.row)"):
+        assert any(r["id"] == rid for r in rows), "a task of another priority is listed"
+    p.select_option("[data-mprio]", "")
+    doc = api(p, "GET", f"year/{y}")["data"]
+    tree.locator("[data-tree=all]").check()
+    expect(tree.locator("tr.lv1")).to_have_count(len(doc["sections"]))
+    tree.locator("[data-tree=open]").click()
+    expect(tree.locator("tr.lv3")).to_have_count(len(doc["rows"]))
